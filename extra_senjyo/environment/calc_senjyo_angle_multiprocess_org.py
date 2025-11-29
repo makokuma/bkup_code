@@ -20,23 +20,31 @@ from matplotlib.path import Path
 import numpy as np
 from joblib import Parallel, delayed
 from functools import lru_cache
+import time
 
-@lru_cache(maxsize=None)
+start_time = time.time()
+
+# --- 手動キャッシュ ---
+wind_cache = {}
+
+#@lru_cache(maxsize=None)
 def openRRAwind_cached(ymdh, prs):
-    u, v = mymod.openRRAwind(ymdh, prs)
-     return u, v
+    key = (ymdh, prs)
+    if key not in wind_cache:
+        wind_cache[key] = mymod.openRRAwind(ymdh, prs)
+    return wind_cache[key]
 
 #set out file
 edgelen = 20 
 region_mode = 2 
 mean_time = 3
 #hr = '0h'
-hour_offset = +3
+hour_offset = 0
 hPa = '900hPa'
 hPa_num = 4 #0-16 1000hPa=0 975hPa=1 950hPa=2 925hPa=3 900hPa=4 875hPa=5 
             #850hPa=6 800hPa=7 750hPa=8 700hPa=9 600hPa=10 500hPa=11 
             #400hPa=12 300hPa=13 200hPa=14 100hPa=15 70hPa=16
-outfile = f'/mnt/jet12/makoto/extract_senjo/senjo_wind/makoto_script/angle_data/angledata_{hour_offset}h_{hPa}.csv'
+outfile = f'/mnt/jet12/makoto/extract_senjo/senjo_wind/makoto_script/angle_data/angledata_{hour_offset}h_{hPa}_test.csv'
 
 #read csv file
 csvfile = '/mnt/jet12/makoto/extract_senjo/RRJ/csv/13reclassify2adddate/alldata_RRJ_1959-2023_reject_seashore_100km.csv'
@@ -56,7 +64,11 @@ results = []
 
 #for i in range(0,len(df)):
 #for i in range(0,2):    
-def process_one_case(i):
+#def process_one_case(i):
+def process_one_case(
+    i, df, rralat, rralon, exlat, exlon,
+    hour_offset, region_mode, edgelen, hPa_num
+):
     row = df.iloc[i]
     hrid = str(row["hrid"]) #ID
     dtst = row["dtst"] #開始時間
@@ -120,19 +132,19 @@ def process_one_case(i):
     p1, p2, p3, p4 = mymod.toLatLon(xy1, xy2, xy3, xy4, clat, clon)
     print(p1, p2, p3, p4)
 
-     poly = Path(np.array([
+    poly = Path(np.array([
              [p1[0], p1[1]],
              [p2[0], p2[1]],
              [p3[0], p3[1]],
              [p4[0], p4[1]],
      ]))
 
-     lon_flat = rralon.flatten()
-     lat_flat = rralat.flatten()
-     points = np.vstack([lon_flat, lat_flat]).T
+    lon_flat = rralon.flatten()
+    lat_flat = rralat.flatten()
+    points = np.vstack([lon_flat, lat_flat]).T
 
-     mask_flat = poly.contains_points(points)
-     mask = mask_flat.reshape(rralon.shape)
+    mask_flat = poly.contains_points(points)
+    mask = mask_flat.reshape(rralon.shape)
     #領域設定のループを固定
 #    yidx, xidx = mymod.loop_region(hra2, exlat, exlon, rralat, rralon)
 #    gnum = yidx.size
@@ -168,7 +180,7 @@ def process_one_case(i):
     u, v = openRRAwind_cached(ymdh, hPa_num)
 
     u_masked = np.where(mask, u, np.nan)
-     v_masked = np.where(mask, v, np.nan)
+    v_masked = np.where(mask, v, np.nan)
 
     #領域内のみ描画（マスキング）
 #    poly = Path(np.array([
@@ -226,8 +238,15 @@ def process_one_case(i):
         "center_lon": clon
     }
 
-N = len(df)  
-excluded = 0
+if __name__ == "__main__":
+    df = pd.read_csv(csvfile)
+    rralat = rrainfo.lats()
+    rralon = rrainfo.lons()
+    exlat = exgrid.exlats()
+    exlon = exgrid.exlons()
+
+    N = 1000
+    excluded = 0
 
 #for result in Parallel(n_jobs=16, backend="loky")(
 #    delayed(process_one_case)(i) for i in range(N)
@@ -235,23 +254,34 @@ excluded = 0
 #    results.append(result)
 #    print(f"[{len(results)}/{N}] done", flush=True)
 
-raw_results = Parallel(n_jobs=16, backend="loky")(
-    delayed(process_one_case)(i) for i in range(N)
-)
+#    raw_results = Parallel(n_jobs=16, backend="loky")(
+#        delayed(process_one_case)(i) for i in range(N)
+#    )   
 
-results = []
-for r in raw_results:
-    if r is None:
-        excluded += 1
-    else:
-        results.append(r)
+#    results = []
+#    for r in raw_results:
+#        if r is None:
+#            excluded += 1
+#        else:
+#            results.append(r)
+    raw_results = Parallel(n_jobs=16)(
+        delayed(process_one_case)(
+            i, df, rralat, rralon, exlat, exlon,
+            hour_offset, region_mode, edgelen, hPa_num
+        )
+        for i in range(N)
+    )
+    results = [r for r in raw_results if r is not None]
+    print(f"===== 除外された事例数（時間シフト範囲外）: {excluded} 件 =====")
+    print(f"===== 使用された事例数: {len(results)} 件 =====")
 
-print(f"===== 除外された事例数（時間シフト範囲外）: {excluded} 件 =====")
-print(f"===== 使用された事例数: {len(results)} 件 =====")
+    #save csv
+    out_df = pd.DataFrame(results)
+    out_df.to_csv(outfile, index=False)
 
-#save csv
-out_df = pd.DataFrame(results)
-out_df.to_csv(outfile, index=False)
+    print(f"Saved → {outfile}")
 
-print(f"Saved → {outfile}")
+    end_time = time.time()
+    print(f"処理時間: {end_time - start_time:.2f} 秒")
+
 
