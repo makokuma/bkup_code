@@ -19,6 +19,12 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.path import Path
 import numpy as np
 from joblib import Parallel, delayed
+from functools import lru_cache
+
+@lru_cache(maxsize=None)
+def openRRAwind_cached(ymdh, prs):
+    u, v = mymod.openRRAwind(ymdh, prs)
+     return u, v
 
 #set out file
 edgelen = 20 
@@ -35,6 +41,16 @@ outfile = f'/mnt/jet12/makoto/extract_senjo/senjo_wind/makoto_script/angle_data/
 #read csv file
 csvfile = '/mnt/jet12/makoto/extract_senjo/RRJ/csv/13reclassify2adddate/alldata_RRJ_1959-2023_reject_seashore_100km.csv'
 df = pd.read_csv(csvfile)
+
+
+rralat = rrainfo.lats()
+rralon = rrainfo.lons()
+rNX = rrainfo.shape()[1]
+rNY = rrainfo.shape()[0]
+exlat = exgrid.exlats()
+exlon = exgrid.exlons()
+NX = exlon.size
+NY = exlat.size
 
 results = []
 
@@ -53,18 +69,18 @@ def process_one_case(i):
     yearid = str(row["year"])
 
     print("dtst:", dtst)
-    print("dten:", dten)
-    print("nt:", nt)
+#    print("dten:", dten)
+#    print("nt:", nt)
     print("angle:", angle)
-    print("ratio:", ratio)
-    print("majorlen:", majorlen)
-    print("minorlen:", minorlen)
+#    print("ratio:", ratio)
+#    print("majorlen:", majorlen)
+#    print("minorlen:", minorlen)
 
     #時間変換
     dt_dt = datetime.strptime(str(dtst), "%Y%m%d%H")
     dt_shifted = dt_dt + timedelta(hours=hour_offset)
     ymdh = dt_shifted.strftime("%Y%m%d%H") + "00"
-    print(f"【環境場の計算時刻】dtst={dtst}  →  ymdh={ymdh} (offset={hour_offset}h)")
+ #   print(f"【環境場の計算時刻】dtst={dtst}  →  ymdh={ymdh} (offset={hour_offset}h)")
 
     # --- データ期間外なら除外 ---
     dt_min = datetime(1959, 1, 1, 0)
@@ -79,15 +95,6 @@ def process_one_case(i):
     #read dat file
     datfile = '/mnt/jet12/makoto/extract_senjo/RRJ/dist/' + yearid + '0101-1231/heavyrain_ra03_5000m_100-80_040_' + hrid[2:] + '.dat'
     
-    rralat = rrainfo.lats()
-    rralon = rrainfo.lons()
-    rNX = rrainfo.shape()[1]
-    rNY = rrainfo.shape()[0]
-    exlat = exgrid.exlats()
-    exlon = exgrid.exlons()
-    NX = exlon.size
-    NY = exlat.size
-
     # 強雨域の形状
     hra = np.fromfile(datfile, dtype='>f').reshape(NY, NX)  # 個々の事例の位置、形状
     hra2 = np.nan_to_num(hra)                               # 欠損値をゼロに
@@ -113,55 +120,72 @@ def process_one_case(i):
     p1, p2, p3, p4 = mymod.toLatLon(xy1, xy2, xy3, xy4, clat, clon)
     print(p1, p2, p3, p4)
 
+     poly = Path(np.array([
+             [p1[0], p1[1]],
+             [p2[0], p2[1]],
+             [p3[0], p3[1]],
+             [p4[0], p4[1]],
+     ]))
+
+     lon_flat = rralon.flatten()
+     lat_flat = rralat.flatten()
+     points = np.vstack([lon_flat, lat_flat]).T
+
+     mask_flat = poly.contains_points(points)
+     mask = mask_flat.reshape(rralon.shape)
     #領域設定のループを固定
-    yidx, xidx = mymod.loop_region(hra2, exlat, exlon, rralat, rralon)
-    gnum = yidx.size
-    glat = np.zeros(gnum)
-    glon = np.zeros(gnum)
-    for i in range(gnum):
-        glat[i] = rralat[yidx[i]][xidx[i]]
-        glon[i] = rralon[yidx[i]][xidx[i]]
+#    yidx, xidx = mymod.loop_region(hra2, exlat, exlon, rralat, rralon)
+#    gnum = yidx.size
+#    glat = np.zeros(gnum)
+#    glon = np.zeros(gnum)
+#    for i in range(gnum):
+#        glat[i] = rralat[yidx[i]][xidx[i]]
+#        glon[i] = rralon[yidx[i]][xidx[i]]
 
     #長方形領域内の格子点を限定
-    contain = np.zeros(gnum)
-    st = time.time()
-    for i in range(gnum):
-        rralatlon = np.array([glon[i], glat[i]])#; print(rralatlon)
-        contain[i] = mymod.ingrid(rralatlon, p1, p2, p3, p4)
-    et = time.time()
-    print('elapsed time = {} sec.'.format(np.round(et-st, 2)))
+#    contain = np.zeros(gnum)
+#    st = time.time()
+#    for i in range(gnum):
+#        rralatlon = np.array([glon[i], glat[i]])#; print(rralatlon)
+#        contain[i] = mymod.ingrid(rralatlon, p1, p2, p3, p4)
+#    et = time.time()
+#    print('elapsed time = {} sec.'.format(np.round(et-st, 2)))
 
-    xidx2 = xidx[contain > 0.5]
-    yidx2 = yidx[contain > 0.5]
-    gnum2 = yidx2.size
-    glat2 = np.zeros(gnum2)
-    glon2 = np.zeros(gnum2)
-    for i in range(gnum2):
-        glat2[i] = rralat[yidx2[i]][xidx2[i]]
-        glon2[i] = rralon[yidx2[i]][xidx2[i]]
+#    xidx2 = xidx[contain > 0.5]
+#    yidx2 = yidx[contain > 0.5]
+#    gnum2 = yidx2.size
+#    glat2 = np.zeros(gnum2)
+#    glon2 = np.zeros(gnum2)
+#    for i in range(gnum2):
+#        glat2[i] = rralat[yidx2[i]][xidx2[i]]
+#        glon2[i] = rralon[yidx2[i]][xidx2[i]]
 
     #環境場の風を計算
 #    ymdh = f'{dtst}00'
 #    print(ymdh)
 
-    u,v = mymod.openRRAwind(ymdh, hPa_num) #4 -> 900hPa
+#    u,v = mymod.openRRAwind(ymdh, hPa_num) #4 -> 900hPa
+    u, v = openRRAwind_cached(ymdh, hPa_num)
+
+    u_masked = np.where(mask, u, np.nan)
+     v_masked = np.where(mask, v, np.nan)
 
     #領域内のみ描画（マスキング）
-    poly = Path(np.array([
-        [p1[0], p1[1]],
-        [p2[0], p2[1]],
-        [p3[0], p3[1]],
-        [p4[0], p4[1]],
-    ]))
+#    poly = Path(np.array([
+#        [p1[0], p1[1]],
+#        [p2[0], p2[1]],
+#        [p3[0], p3[1]],
+#        [p4[0], p4[1]],
+#    ]))
 
     # ---- 全格子点を1次元化 ----
-    lon_flat = rralon.flatten()
-    lat_flat = rralat.flatten()
-    points = np.vstack([lon_flat, lat_flat]).T
+#    lon_flat = rralon.flatten()
+#    lat_flat = rralat.flatten()
+#    points = np.vstack([lon_flat, lat_flat]).T
 
     # ---- ポリゴン内判定 ----
-    mask_flat = poly.contains_points(points)
-    mask = mask_flat.reshape(rralon.shape)
+#    mask_flat = poly.contains_points(points)
+#    mask = mask_flat.reshape(rralon.shape)
 
     # ---- 内側のみの風 ----
     u_masked = np.where(mask, u, np.nan)
