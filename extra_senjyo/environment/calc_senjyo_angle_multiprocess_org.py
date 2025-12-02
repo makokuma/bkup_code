@@ -19,56 +19,30 @@ from matplotlib.colors import LinearSegmentedColormap
 from matplotlib.path import Path
 import numpy as np
 from joblib import Parallel, delayed
-from functools import lru_cache
-import time
-
-start_time = time.time()
-
-# --- 手動キャッシュ ---
-wind_cache = {}
-
-#@lru_cache(maxsize=None)
-def openRRAwind_cached(ymdh, prs):
-    key = (ymdh, prs)
-    if key not in wind_cache:
-        wind_cache[key] = mymod.openRRAwind(ymdh, prs)
-    return wind_cache[key]
 
 #set out file
 edgelen = 20 
 region_mode = 2 
 mean_time = 3
 #hr = '0h'
-hour_offset = 0
-hPa = '900hPa'
-hPa_num = 4 #0-16 1000hPa=0 975hPa=1 950hPa=2 925hPa=3 900hPa=4 875hPa=5 
+
+#hour_offset = -3
+#hour_offsets = [-3, 0, +3]
+#hPa = '400hPa'
+#hPa_num = 12 #0-16 1000hPa=0 975hPa=1 950hPa=2 925hPa=3 900hPa=4 875hPa=5 
             #850hPa=6 800hPa=7 750hPa=8 700hPa=9 600hPa=10 500hPa=11 
             #400hPa=12 300hPa=13 200hPa=14 100hPa=15 70hPa=16
-outfile = f'/mnt/jet12/makoto/extract_senjo/senjo_wind/makoto_script/angle_data/angledata_{hour_offset}h_{hPa}_test.csv'
+#outfile = f'/mnt/jet12/makoto/extract_senjo/senjo_wind/makoto_script/angle_data/angledata_{hour_offset}h_{hPa}.csv'
 
 #read csv file
 csvfile = '/mnt/jet12/makoto/extract_senjo/RRJ/csv/13reclassify2adddate/alldata_RRJ_1959-2023_reject_seashore_100km.csv'
 df = pd.read_csv(csvfile)
 
-
-rralat = rrainfo.lats()
-rralon = rrainfo.lons()
-rNX = rrainfo.shape()[1]
-rNY = rrainfo.shape()[0]
-exlat = exgrid.exlats()
-exlon = exgrid.exlons()
-NX = exlon.size
-NY = exlat.size
-
 results = []
 
 #for i in range(0,len(df)):
 #for i in range(0,2):    
-#def process_one_case(i):
-def process_one_case(
-    i, df, rralat, rralon, exlat, exlon,
-    hour_offset, region_mode, edgelen, hPa_num
-):
+def process_one_case(i):
     row = df.iloc[i]
     hrid = str(row["hrid"]) #ID
     dtst = row["dtst"] #開始時間
@@ -81,18 +55,18 @@ def process_one_case(
     yearid = str(row["year"])
 
     print("dtst:", dtst)
-#    print("dten:", dten)
-#    print("nt:", nt)
+    print("dten:", dten)
+    print("nt:", nt)
     print("angle:", angle)
-#    print("ratio:", ratio)
-#    print("majorlen:", majorlen)
-#    print("minorlen:", minorlen)
+    print("ratio:", ratio)
+    print("majorlen:", majorlen)
+    print("minorlen:", minorlen)
 
     #時間変換
     dt_dt = datetime.strptime(str(dtst), "%Y%m%d%H")
     dt_shifted = dt_dt + timedelta(hours=hour_offset)
     ymdh = dt_shifted.strftime("%Y%m%d%H") + "00"
- #   print(f"【環境場の計算時刻】dtst={dtst}  →  ymdh={ymdh} (offset={hour_offset}h)")
+    print(f"【環境場の計算時刻】dtst={dtst}  →  ymdh={ymdh} (offset={hour_offset}h)")
 
     # --- データ期間外なら除外 ---
     dt_min = datetime(1959, 1, 1, 0)
@@ -107,6 +81,15 @@ def process_one_case(
     #read dat file
     datfile = '/mnt/jet12/makoto/extract_senjo/RRJ/dist/' + yearid + '0101-1231/heavyrain_ra03_5000m_100-80_040_' + hrid[2:] + '.dat'
     
+    rralat = rrainfo.lats()
+    rralon = rrainfo.lons()
+    rNX = rrainfo.shape()[1]
+    rNY = rrainfo.shape()[0]
+    exlat = exgrid.exlats()
+    exlon = exgrid.exlons()
+    NX = exlon.size
+    NY = exlat.size
+
     # 強雨域の形状
     hra = np.fromfile(datfile, dtype='>f').reshape(NY, NX)  # 個々の事例の位置、形状
     hra2 = np.nan_to_num(hra)                               # 欠損値をゼロに
@@ -132,72 +115,55 @@ def process_one_case(
     p1, p2, p3, p4 = mymod.toLatLon(xy1, xy2, xy3, xy4, clat, clon)
     print(p1, p2, p3, p4)
 
-    poly = Path(np.array([
-             [p1[0], p1[1]],
-             [p2[0], p2[1]],
-             [p3[0], p3[1]],
-             [p4[0], p4[1]],
-     ]))
-
-    lon_flat = rralon.flatten()
-    lat_flat = rralat.flatten()
-    points = np.vstack([lon_flat, lat_flat]).T
-
-    mask_flat = poly.contains_points(points)
-    mask = mask_flat.reshape(rralon.shape)
     #領域設定のループを固定
-#    yidx, xidx = mymod.loop_region(hra2, exlat, exlon, rralat, rralon)
-#    gnum = yidx.size
-#    glat = np.zeros(gnum)
-#    glon = np.zeros(gnum)
-#    for i in range(gnum):
-#        glat[i] = rralat[yidx[i]][xidx[i]]
-#        glon[i] = rralon[yidx[i]][xidx[i]]
+    yidx, xidx = mymod.loop_region(hra2, exlat, exlon, rralat, rralon)
+    gnum = yidx.size
+    glat = np.zeros(gnum)
+    glon = np.zeros(gnum)
+    for i in range(gnum):
+        glat[i] = rralat[yidx[i]][xidx[i]]
+        glon[i] = rralon[yidx[i]][xidx[i]]
 
     #長方形領域内の格子点を限定
-#    contain = np.zeros(gnum)
-#    st = time.time()
-#    for i in range(gnum):
-#        rralatlon = np.array([glon[i], glat[i]])#; print(rralatlon)
-#        contain[i] = mymod.ingrid(rralatlon, p1, p2, p3, p4)
-#    et = time.time()
-#    print('elapsed time = {} sec.'.format(np.round(et-st, 2)))
+    contain = np.zeros(gnum)
+    st = time.time()
+    for i in range(gnum):
+        rralatlon = np.array([glon[i], glat[i]])#; print(rralatlon)
+        contain[i] = mymod.ingrid(rralatlon, p1, p2, p3, p4)
+    et = time.time()
+    print('elapsed time = {} sec.'.format(np.round(et-st, 2)))
 
-#    xidx2 = xidx[contain > 0.5]
-#    yidx2 = yidx[contain > 0.5]
-#    gnum2 = yidx2.size
-#    glat2 = np.zeros(gnum2)
-#    glon2 = np.zeros(gnum2)
-#    for i in range(gnum2):
-#        glat2[i] = rralat[yidx2[i]][xidx2[i]]
-#        glon2[i] = rralon[yidx2[i]][xidx2[i]]
+    xidx2 = xidx[contain > 0.5]
+    yidx2 = yidx[contain > 0.5]
+    gnum2 = yidx2.size
+    glat2 = np.zeros(gnum2)
+    glon2 = np.zeros(gnum2)
+    for i in range(gnum2):
+        glat2[i] = rralat[yidx2[i]][xidx2[i]]
+        glon2[i] = rralon[yidx2[i]][xidx2[i]]
 
     #環境場の風を計算
 #    ymdh = f'{dtst}00'
 #    print(ymdh)
 
-#    u,v = mymod.openRRAwind(ymdh, hPa_num) #4 -> 900hPa
-    u, v = openRRAwind_cached(ymdh, hPa_num)
-
-    u_masked = np.where(mask, u, np.nan)
-    v_masked = np.where(mask, v, np.nan)
+    u,v = mymod.openRRAwind(ymdh, hPa_num) #4 -> 900hPa
 
     #領域内のみ描画（マスキング）
-#    poly = Path(np.array([
-#        [p1[0], p1[1]],
-#        [p2[0], p2[1]],
-#        [p3[0], p3[1]],
-#        [p4[0], p4[1]],
-#    ]))
+    poly = Path(np.array([
+        [p1[0], p1[1]],
+        [p2[0], p2[1]],
+        [p3[0], p3[1]],
+        [p4[0], p4[1]],
+    ]))
 
     # ---- 全格子点を1次元化 ----
-#    lon_flat = rralon.flatten()
-#    lat_flat = rralat.flatten()
-#    points = np.vstack([lon_flat, lat_flat]).T
+    lon_flat = rralon.flatten()
+    lat_flat = rralat.flatten()
+    points = np.vstack([lon_flat, lat_flat]).T
 
     # ---- ポリゴン内判定 ----
-#    mask_flat = poly.contains_points(points)
-#    mask = mask_flat.reshape(rralon.shape)
+    mask_flat = poly.contains_points(points)
+    mask = mask_flat.reshape(rralon.shape)
 
     # ---- 内側のみの風 ----
     u_masked = np.where(mask, u, np.nan)
@@ -238,14 +204,18 @@ def process_one_case(
         "center_lon": clon
     }
 
-if __name__ == "__main__":
-    df = pd.read_csv(csvfile)
-    rralat = rrainfo.lats()
-    rralon = rrainfo.lons()
-    exlat = exgrid.exlats()
-    exlon = exgrid.exlons()
 
-    N = 1000
+hour_offsets = [-3, 0, +3]
+hPa = '300hPa'
+hPa_num = 13 #0-16 1000hPa=0 975hPa=1 950hPa=2 925hPa=3 900hPa=4 875hPa=5 
+            #850hPa=6 800hPa=7 750hPa=8 700hPa=9 600hPa=10 500hPa=11 
+            #400hPa=12 300hPa=13 200hPa=14 100hPa=15 70hPa=16
+
+for hour_offset in hour_offsets:
+
+    outfile = f'/mnt/jet12/makoto/extract_senjo/senjo_wind/makoto_script/angle_data/angledata_{hour_offset}h_{hPa}.csv'
+
+    N = len(df)  
     excluded = 0
 
 #for result in Parallel(n_jobs=16, backend="loky")(
@@ -254,24 +224,17 @@ if __name__ == "__main__":
 #    results.append(result)
 #    print(f"[{len(results)}/{N}] done", flush=True)
 
-#    raw_results = Parallel(n_jobs=16, backend="loky")(
-#        delayed(process_one_case)(i) for i in range(N)
-#    )   
-
-#    results = []
-#    for r in raw_results:
-#        if r is None:
-#            excluded += 1
-#        else:
-#            results.append(r)
-    raw_results = Parallel(n_jobs=16)(
-        delayed(process_one_case)(
-            i, df, rralat, rralon, exlat, exlon,
-            hour_offset, region_mode, edgelen, hPa_num
-        )
-        for i in range(N)
+    raw_results = Parallel(n_jobs=16, backend="loky")(
+        delayed(process_one_case)(i) for i in range(N)
     )
-    results = [r for r in raw_results if r is not None]
+
+    results = []
+    for r in raw_results:
+        if r is None:
+            excluded += 1
+        else:
+            results.append(r)
+
     print(f"===== 除外された事例数（時間シフト範囲外）: {excluded} 件 =====")
     print(f"===== 使用された事例数: {len(results)} 件 =====")
 
@@ -280,8 +243,4 @@ if __name__ == "__main__":
     out_df.to_csv(outfile, index=False)
 
     print(f"Saved → {outfile}")
-
-    end_time = time.time()
-    print(f"処理時間: {end_time - start_time:.2f} 秒")
-
 
